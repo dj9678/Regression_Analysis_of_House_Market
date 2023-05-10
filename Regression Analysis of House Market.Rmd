@@ -1,0 +1,215 @@
+---
+title: "ISYE6414 Project"
+author: "Dongsuk Jeong"
+date: "2023-03-23"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(readxl)
+df <- read_excel("House_Market_dataset.xlsx")
+df
+```
+In this dataset, we have sold home price of 2023, address, number of bedrooms, number of bathrooms, square feet of house, type of house (house, townhome, multifamily), heating (single type, multiple type), cooling (single type, multiple type), year built, type of parking space (no parking space to 6 parking space), lot (whole space of house including backyard etc), and home value of 2019. For heating and cooling, I tried to sort original data as 2 group since our dataset is not big enough to have many of categorical variables. In heating and cooling variables, single type includes heat pump, natural gas, forced air, etc. Multiple mean more than one type of heating/cooling system. For home value of 2019, since not all of house is sold in 2019, we couldn't find sold home price for all the house in the dataset. So, we estimated 2019 home price from tax assessment. Tax assessment in Georgia usually 40% of home price, so I simply divide 40% from 2019 tax assessment to estimate home price of 2019.Then, let's start analysis. Since we have more than one data and no time related variables, I start from multiple linear regression.
+
+```{r}
+reg1 = lm(price_2023~bedrooms+bathrooms+sqft+year_built+lot+factor(type)+factor(heating)+factor(cooling)+factor(parking), data=df)
+summary(reg1)
+plot(reg1, which = 1:2)
+```
+residual vs fitted value graph has u shape so constant variance might not hold. this leads me to do log transformation. I took log for both y and x variables. it also shows some clustering. it seems have weak normality but lots of off data at the tail. Since the unit of y variable is very large compared to x variables such as bedrooms, bathrooms, etc, I conduct boxcox method to see if y variables need to be transformed.
+
+```{r}
+library(MASS)
+
+y = df$price_2023
+boxcox(lm(y~1))
+```
+As value of lambda is close to 0, this indicates us that we need to use log transformation. 
+
+```{r}
+reg2 = lm(log(price_2023)~bedrooms+bathrooms+sqft+year_built+lot+factor(type)+factor(heating)+factor(cooling)+factor(parking), data=df)
+summary(reg2)
+plot(reg2, which = 1:2)
+```
+Even after log transformation, the result is not good. it even got worse than reg1. So, I decide to use log linear regression in order to match the unit on both y and x variables relatively.
+
+```{r}
+reg3 = lm(log(price_2023)~log(bedrooms)+log(bathrooms)+log(sqft)+log(year_built)+log(lot)+factor(type)+factor(heating)+factor(cooling)+factor(parking), data=df)
+summary(reg3)
+plot(reg3, which = 1:2)
+```
+It turns out reg3 is the best model since it has similar R-squared with reg 1, but hold assumption better than reg1.we can see reg3 shows best constant variance assumption(less U shape compared to reg1 and reg3) and normality.However, since R-squared of reg3 is still quite low to consider, so I considered interaction variables as well in the model. with interaction variables included model, I tried with log form of y and without log form of y, and it turns out without log transformation give me better choice. So I just keep y variables without log transformation.
+
+```{r}
+reg0 = lm(price_2023~(bedrooms+bathrooms+sqft+year_built+lot+factor(type)+factor(heating)+factor(cooling)+factor(parking))^2, data=df)
+summary(reg0)
+anova(reg0)
+plot(reg0, which = 1:2)
+```
+with interaction, we can see R square went up much more. However, since we have too many variables, lets do stepwise variable selection to see which variables is important.
+
+```{r}
+intercept_only = lm(price_2023 ~ 1, data=df)
+
+all <- reg0
+
+forward = step(intercept_only, direction='forward', scope=formula(all), trace=0)
+forward$anova
+```
+with important variables only, lets rebuild model.
+
+```{r}
+reg01 = lm(price_2023~sqft+bedrooms+bedrooms:sqft+year_built+bedrooms:year_built+factor(type)+year_built:factor(type)+bathrooms+bathrooms:sqft, data=df)
+summary(reg01)
+plot(reg01, which = 1:2)
+hist(reg01$residuals)
+mean(reg01$residuals)
+```
+after rebuild the model, we can see R squared went down a lot again. This is because we might have outliers so lets check outliers.
+
+```{r}
+library(magrittr)
+library(dplyr)
+
+reg01 = lm(price_2023~sqft+bedrooms+bedrooms:sqft+year_built+bedrooms:year_built+factor(type)+year_built:factor(type)+bathrooms+ bathrooms:sqft, data=df)
+
+### reg0_1
+df$cooksD1 = cooks.distance(reg01)
+influential1 = df$cooksD1[(df$cooksD1 > (3 * mean(df$cooksD1, na.rm = TRUE)))]
+
+n_influential1 = names(influential1)
+outliers1 = df[n_influential1,]
+df_no_outliers1 = df %>% anti_join(outliers1)
+
+reg0_1 = lm(price_2023~sqft+bedrooms+bedrooms:sqft+year_built+bedrooms:year_built+factor(type)+year_built:factor(type)+bathrooms+ bathrooms:sqft,data=df_no_outliers1)
+summary(reg0_1)
+plot(reg0_1, which = 4)
+
+#### reg0_2
+df_no_outliers1$cooksD2 = cooks.distance(reg0_1)
+influential2 = df_no_outliers1$cooksD2[(df_no_outliers1$cooksD2 > (3 * mean(df_no_outliers1$cooksD2, na.rm = TRUE)))]
+
+n_influential2 = names(influential2)
+outliers2 = df_no_outliers1[n_influential2,]
+df_no_outliers2 = df_no_outliers1 %>% anti_join(outliers2)
+
+reg0_2 = lm(price_2023~sqft+bedrooms+bedrooms:sqft+year_built+bedrooms:year_built+factor(type)+year_built:factor(type)+bathrooms+ bathrooms:sqft,data=df_no_outliers2)
+summary(reg0_2)
+plot(reg0_2, which = 4)
+
+#### reg0_3
+df_no_outliers2$cooksD3 = cooks.distance(reg0_2)
+influential3 = df_no_outliers2$cooksD3[(df_no_outliers2$cooksD3 > (3 * mean(df_no_outliers2$cooksD3, na.rm = TRUE)))]
+
+n_influential3 = names(influential3)
+outliers3 = df_no_outliers2[n_influential3,]
+df_no_outliers3 = df_no_outliers2 %>% anti_join(outliers3)
+
+reg0_3 = lm(price_2023~sqft+bedrooms+bedrooms:sqft+year_built+bedrooms:year_built+factor(type)+year_built:factor(type)+bathrooms+ bathrooms:sqft,data=df_no_outliers3)
+summary(reg0_3)
+plot(reg0_3, which = 4)
+
+#### reg0_4
+df_no_outliers3$cooksD4 = cooks.distance(reg0_3)
+influential4 = df_no_outliers3$cooksD4[(df_no_outliers3$cooksD4 > (3 * mean(df_no_outliers3$cooksD4, na.rm = TRUE)))]
+
+n_influential4 = names(influential4)
+outliers4 = df_no_outliers3[n_influential4,]
+df_no_outliers4 = df_no_outliers3 %>% anti_join(outliers4)
+
+reg0_4 = lm(price_2023~sqft+bedrooms+bedrooms:sqft+year_built+bedrooms:year_built+factor(type)+year_built:factor(type)+bathrooms+ bathrooms:sqft,data=df_no_outliers4)
+summary(reg0_4)
+plot(reg0_4, which = 1:4)
+```
+after removing outliers, R squared wen up to 0.81 again.And, even we have little bit of U shape for constant variance plot, I think it is acceptable. However, intuitively, bedroom should be important variable in the model, but it is not from the result. This would be from the issue of multicollinearity. So, let's check.
+
+```{r}
+library(car)
+vif(reg0_4)
+```
+As we can see sqft:bedrooms and sqft:bathrooms is quite close to 10. I just dropped them from the model.
+
+```{r}
+reg0_5 = lm(price_2023~sqft+bedrooms+bedrooms:year_built+year_built+factor(type)+year_built:factor(type)+bathrooms,data=df_no_outliers4)
+summary(reg0_5)
+mean(reg0_5$residuals)
+plot(reg0_5, which = 1:2)
+hist(reg0_5$residuals)
+```
+as we can see bedrooms now become significant. the result seems quite make sense and match with intuition as well. Thus, I would select this as our project final model. the model holds normality very well as we can confirm from histogram and plot. also, acceptable constant variable assumption. Now, lets compare the result with 2019 house price.
+
+```{r}
+reg02 = lm(price_2019~sqft+bedrooms+bedrooms:sqft+year_built+bedrooms:year_built+factor(type)+year_built:factor(type)+bathrooms+ bathrooms:sqft, data=df)
+
+### reg02_1
+df$cooksD1 = cooks.distance(reg02)
+influential1 = df$cooksD1[(df$cooksD1 > (3 * mean(df$cooksD1, na.rm = TRUE)))]
+
+n_influential1 = names(influential1)
+outliers1 = df[n_influential1,]
+df_no_outliers1 = df %>% anti_join(outliers1)
+
+reg02_1 = lm(price_2019~sqft+bedrooms+bedrooms:sqft+year_built+bedrooms:year_built+factor(type)+year_built:factor(type)+bathrooms+ bathrooms:sqft,data=df_no_outliers1)
+summary(reg02_1)
+plot(reg02_1, which = 4)
+
+#### reg02_2
+df_no_outliers1$cooksD2 = cooks.distance(reg02_1)
+influential2 = df_no_outliers1$cooksD2[(df_no_outliers1$cooksD2 > (3 * mean(df_no_outliers1$cooksD2, na.rm = TRUE)))]
+
+n_influential2 = names(influential2)
+outliers2 = df_no_outliers1[n_influential2,]
+df_no_outliers2 = df_no_outliers1 %>% anti_join(outliers2)
+
+reg02_2 = lm(price_2019~sqft+bedrooms+bedrooms:sqft+year_built+bedrooms:year_built+factor(type)+year_built:factor(type)+bathrooms+ bathrooms:sqft,data=df_no_outliers2)
+summary(reg02_2)
+plot(reg02_2, which = 4)
+
+#### reg02_3
+df_no_outliers2$cooksD3 = cooks.distance(reg02_2)
+influential3 = df_no_outliers2$cooksD3[(df_no_outliers2$cooksD3 > (3 * mean(df_no_outliers2$cooksD3, na.rm = TRUE)))]
+
+n_influential3 = names(influential3)
+outliers3 = df_no_outliers2[n_influential3,]
+df_no_outliers3 = df_no_outliers2 %>% anti_join(outliers3)
+
+reg02_3 = lm(price_2019~sqft+bedrooms+bedrooms:sqft+year_built+bedrooms:year_built+factor(type)+year_built:factor(type)+bathrooms+ bathrooms:sqft,data=df_no_outliers3)
+summary(reg02_3)
+plot(reg02_3, which = 4)
+
+#### reg0_4
+df_no_outliers3$cooksD4 = cooks.distance(reg02_3)
+influential4 = df_no_outliers3$cooksD4[(df_no_outliers3$cooksD4 > (3 * mean(df_no_outliers3$cooksD4, na.rm = TRUE)))]
+
+n_influential4 = names(influential4)
+outliers4 = df_no_outliers3[n_influential4,]
+df_no_outliers2_4 = df_no_outliers3 %>% anti_join(outliers4)
+
+reg02_4 = lm(price_2019~sqft+bedrooms+bedrooms:sqft+year_built+bedrooms:year_built+factor(type)+year_built:factor(type)+bathrooms+ bathrooms:sqft,data=df_no_outliers2_4)
+summary(reg02_4)
+plot(reg02_4, which = 1:4)
+```
+after getting dataset with outliers removed, lets use same model with final 2023 model.
+
+```{r}
+library(car)
+vif(reg02_4)
+```
+
+```{r}
+reg02_5 = lm(price_2019~sqft+bedrooms+bedrooms:year_built+year_built+factor(type)+year_built:factor(type)+bathrooms,data=df_no_outliers2_4)
+summary(reg02_5)
+mean(reg02_5$residuals)
+plot(reg02_5, which = 1:2)
+hist(reg02_5$residuals)
+```
+For some reason, R squared went down a lot. This is because we have different variables correlated each other compared to 2023. (take a look at multicollinearity test reg02_4). However, in order to compare the result with 2023, I think we need to keep same model for both 2019 and 2023. The result, we can compare different variables are significant in 2019 and 2023. Also, we can compare the coefficient in 2019 and 2023 for report and presentation.
+
+
+
+
