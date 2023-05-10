@@ -1,10 +1,3 @@
----
-title: "ISYE6414 Project"
-author: "Dongsuk Jeong"
-date: "2023-03-23"
-output: pdf_document
----
-
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
